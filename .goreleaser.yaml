@@ -1,0 +1,44 @@
+version: 2
+
+project_name: aria2-tui
+
+dist: .builds
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: build_noncgo
+    main: ./cmd/aria2-tui
+    binary: aria2-tui
+    ldflags:
+      - -s -w -X github.com/KevinYouu/aria2-tui/internal/version.Version={{.Version}}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: archive_noncgo
+    builds: [build_noncgo]
+    format: zip
+    files:
+      - LICENSE
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+
+snapshot:
+  version_template: '{{ incpatch .Version }}'

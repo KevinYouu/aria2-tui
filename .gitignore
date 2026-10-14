@@ -1,0 +1,4 @@
+.vscode/
+.builds/
+coverage.out
+/aria2-tui
