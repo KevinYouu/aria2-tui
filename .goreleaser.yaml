@@ -27,7 +27,10 @@ builds:
 archives:
   - id: archive_noncgo
     builds: [build_noncgo]
-    format: zip
+    # The default archive name template is <project>_<version>_<os>_<arch>,
+    # where <version> has no leading "v"; the install scripts assume exactly
+    # that, so it is left at the default here.
+    formats: [zip]
     files:
       - LICENSE
 

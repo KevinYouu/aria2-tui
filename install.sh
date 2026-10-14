@@ -16,6 +16,11 @@ if [ -z "$version" ]; then
 fi
 echo "latest version: $version"
 
+# The release tag keeps its "v" prefix in the download URL, while GoReleaser
+# names the asset after the version without it (v1.0.0 -> aria2-tui_1.0.0_*.zip).
+tag="$version"
+version="${version#v}"
+
 package_name=""
 install_dir="/usr/local/bin"
 
@@ -54,7 +59,7 @@ function systemCheck() {
 }
 
 systemCheck
-url=https://github.com/$repo/releases/download/$version/aria2-tui_"$version"_"$package_name".zip
+url=https://github.com/$repo/releases/download/$tag/aria2-tui_"$version"_"$package_name".zip
 file=aria2-tui_"$version"_"$package_name".zip
 
 echo "Downloading $url"

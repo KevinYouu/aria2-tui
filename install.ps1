@@ -25,8 +25,11 @@ switch ($arch) {
     }
 }
 
-# Build download URL and file name
-$url = "https://github.com/$repo/releases/download/$version/aria2-tui_${version}_${package_name}.zip"
+# Build download URL and file name. The tag keeps its "v" prefix in the URL,
+# while GoReleaser names the asset after the version without it.
+$tag = $version
+$version = $version -replace '^v', ''
+$url = "https://github.com/$repo/releases/download/$tag/aria2-tui_${version}_${package_name}.zip"
 $file = "aria2-tui_${version}_${package_name}.zip"
 
 # Download ZIP file
