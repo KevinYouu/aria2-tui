@@ -128,11 +128,9 @@ func applyPalette(p palette) {
 // colors at build time, so applyPalette rebuilds them on every mode switch.
 var (
 	ErrorStyle       lipgloss.Style // text style: always the primary color
-	SuccessStyle     lipgloss.Style
 	WarningStyle     lipgloss.Style
 	InfoStyle        lipgloss.Style
 	ErrorIconStyle   lipgloss.Style // icon style: carries the semantic color
-	SuccessIconStyle lipgloss.Style
 	WarningIconStyle lipgloss.Style
 	InfoIconStyle    lipgloss.Style
 )
@@ -140,10 +138,6 @@ var (
 // rebuildStyles rebuilds the package level styles.
 func rebuildStyles() {
 	ErrorStyle = lipgloss.NewStyle().
-		Foreground(PrimaryColor).
-		Bold(true)
-
-	SuccessStyle = lipgloss.NewStyle().
 		Foreground(PrimaryColor).
 		Bold(true)
 
@@ -156,10 +150,6 @@ func rebuildStyles() {
 
 	ErrorIconStyle = lipgloss.NewStyle().
 		Foreground(ErrorColor).
-		Bold(true)
-
-	SuccessIconStyle = lipgloss.NewStyle().
-		Foreground(SuccessColor).
 		Bold(true)
 
 	WarningIconStyle = lipgloss.NewStyle().

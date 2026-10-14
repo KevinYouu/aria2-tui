@@ -192,9 +192,6 @@ func (d *Daemon) Endpoint() Endpoint { return d.ep }
 // Version returns the daemon version detected at startup.
 func (d *Daemon) Version() string { return d.version }
 
-// Output returns the captured daemon output.
-func (d *Daemon) Output() string { return d.output.String() }
-
 // Done is closed once the daemon process has exited.
 func (d *Daemon) Done() <-chan struct{} { return d.done }
 

@@ -66,9 +66,6 @@ func NewClient(ep Endpoint) *Client {
 	}
 }
 
-// Endpoint returns the endpoint this client talks to.
-func (c *Client) Endpoint() Endpoint { return c.ep }
-
 type rpcRequest struct {
 	JSONRPC string `json:"jsonrpc"`
 	ID      string `json:"id"`
