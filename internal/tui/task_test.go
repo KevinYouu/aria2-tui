@@ -81,6 +81,9 @@ func TestFormatBytesAndSpeed(t *testing.T) {
 		{in: 1536, want: "1.5 KiB"},
 		{in: 12 * 1024 * 1024, want: "12.0 MiB"},
 		{in: 3 * 1024 * 1024 * 1024, want: "3.0 GiB"},
+		{in: 1024 * 1024 * 1024 * 1024, want: "1.0 TiB"},
+		{in: 1024 * 1024 * 1024 * 1024 * 1024, want: "1.0 PiB"},
+		{in: 2 * 1024 * 1024 * 1024 * 1024 * 1024, want: "2.0 PiB"},
 	}
 
 	for _, tt := range tests {

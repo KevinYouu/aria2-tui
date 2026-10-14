@@ -447,23 +447,28 @@ func (a *App) actionCmd(notice string, run func(context.Context) error) tea.Cmd 
 }
 
 // concurrencyCmd changes the parallelism limit optimistically, persists it and
-// rolls back when aria2 rejects the change.
+// rolls back when aria2 rejects the change. The config value and its rollback
+// target are captured here because the command runs on its own goroutine while
+// Update may already be handling the next key press.
 func (a *App) concurrencyCmd(delta int) tea.Cmd {
-	next := clampInt(a.config.MaxConcurrentDownloads+delta, config.MinConcurrentDownloads, config.MaxConcurrentDownloads)
-	if next == a.config.MaxConcurrentDownloads {
+	previous := a.config
+	next := clampInt(previous.MaxConcurrentDownloads+delta, config.MinConcurrentDownloads, config.MaxConcurrentDownloads)
+	if next == previous.MaxConcurrentDownloads {
 		return nil
 	}
-	previous := a.config.MaxConcurrentDownloads
-	a.config.MaxConcurrentDownloads = next
+
+	updated := previous
+	updated.MaxConcurrentDownloads = next
+	a.config = updated
 
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(a.ctx, rpcTimeout)
 		defer cancel()
 
 		if err := a.deps.Client.SetMaxConcurrent(ctx, next); err != nil {
-			return concurrencyMsg{value: previous, err: err}
+			return concurrencyMsg{value: previous.MaxConcurrentDownloads, err: err}
 		}
-		if err := a.deps.Store.Save(a.config); err != nil {
+		if err := a.deps.Store.Save(updated); err != nil {
 			return concurrencyMsg{value: next, err: err}
 		}
 		return concurrencyMsg{value: next}

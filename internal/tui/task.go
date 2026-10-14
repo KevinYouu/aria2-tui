@@ -76,7 +76,7 @@ func formatBytes(bytes uint64) string {
 	units := []string{"KiB", "MiB", "GiB", "TiB", "PiB"}
 	value := float64(bytes)
 	unit := 0
-	for value >= step && unit < len(units)-1 {
+	for value >= step && unit < len(units) {
 		value /= step
 		unit++
 	}

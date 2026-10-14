@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -407,6 +408,62 @@ func TestAppIgnoresUnknownMessages(t *testing.T) {
 
 	if h.app.view != viewAdd {
 		t.Errorf("view = %v, want the view unchanged", h.app.view)
+	}
+}
+
+// The + and - commands run on their own goroutine while the next key press is
+// already being handled; run several changes concurrently so the race detector
+// covers the shared config value.
+func TestAppHandlesRapidConcurrencyChanges(t *testing.T) {
+	fake := newFakeRPC(t)
+	fake.setTasks([]map[string]any{taskJSON("a1", "one.iso", "active", 100, 50, 10, 4)}, nil, nil)
+	h := newHarnessWithConfig(t, fake, defaultTestConfig(), nil)
+
+	var cmds []tea.Cmd
+	for range 4 {
+		model, cmd := h.app.Update(tea.KeyPressMsg{Code: '+', Text: "+"})
+		if app, ok := model.(*App); ok {
+			h.app = app
+		}
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	if len(cmds) == 0 {
+		t.Fatal("no concurrency commands were produced")
+	}
+
+	var wg sync.WaitGroup
+	results := make(chan tea.Msg, len(cmds))
+	for _, cmd := range cmds {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results <- cmd()
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	for msg := range results {
+		h.send(msg)
+	}
+
+	got := h.app.config.MaxConcurrentDownloads
+	if got < config.DefaultConcurrentDownloads || got > config.DefaultConcurrentDownloads+len(cmds) {
+		t.Errorf("concurrency = %d after %d overlapping changes, want it within bounds", got, len(cmds))
+	}
+
+	persisted, err := os.ReadFile(h.app.deps.Store.Path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", h.app.deps.Store.Path, err)
+	}
+	var stored config.Config
+	if err := json.Unmarshal(persisted, &stored); err != nil {
+		t.Fatalf("Unmarshal(%s) error = %v", persisted, err)
+	}
+	if stored.MaxConcurrentDownloads != got {
+		t.Errorf("persisted concurrency = %d, want the value in effect %d", stored.MaxConcurrentDownloads, got)
 	}
 }
 
