@@ -30,6 +30,8 @@ type fakeRPC struct {
 	calls        []recordedCall
 	httpRequests int
 	handlers     map[string]func(params []any) (any, error)
+	// dropResults truncates multicall responses, to model a malformed reply.
+	dropResults int
 }
 
 func newFakeRPC(t *testing.T) *fakeRPC {
@@ -76,6 +78,12 @@ func (f *fakeRPC) requestCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.httpRequests
+}
+
+func (f *fakeRPC) dropMulticallResults(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dropResults = n
 }
 
 func (f *fakeRPC) record(method string, params []any) {
@@ -139,6 +147,14 @@ func (f *fakeRPC) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			entries = append(entries, []any{value})
 		}
+
+		f.mu.Lock()
+		drop := f.dropResults
+		f.mu.Unlock()
+		if drop > 0 && drop < len(entries) {
+			entries = entries[:len(entries)-drop]
+		}
+
 		writeJSON(w, map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": entries})
 		return
 	}
@@ -597,5 +613,70 @@ func TestParseMulticallRejectsUnexpectedShapes(t *testing.T) {
 				t.Errorf("parseMulticall(%s) error = nil, want an error", tt.raw)
 			}
 		})
+	}
+}
+
+// A truncated multicall reply must be an error, not an index-out-of-range
+// panic inside the polling command.
+func TestSnapshotRejectsTruncatedMulticallResult(t *testing.T) {
+	fake := newFakeRPC(t)
+	fake.serveSnapshot([]map[string]any{activeTaskJSON()}, []map[string]any{}, []map[string]any{})
+	fake.dropMulticallResults(1)
+
+	_, err := NewClient(fake.endpoint("secret")).Snapshot(context.Background())
+	if err == nil {
+		t.Fatal("Snapshot() error = nil, want an error for a short response")
+	}
+	if !strings.Contains(err.Error(), "results") {
+		t.Errorf("Snapshot() error = %q, want it to mention the mismatched result count", err)
+	}
+}
+
+func TestAddURIsRejectsTruncatedMulticallResult(t *testing.T) {
+	fake := newFakeRPC(t)
+	fake.onResult("aria2.addUri", "gid-1")
+	fake.dropMulticallResults(1)
+
+	gids, err := NewClient(fake.endpoint("secret")).AddURIs(context.Background(),
+		[]string{"http://example.org/one", "http://example.org/two"}, nil)
+	if err == nil {
+		t.Fatal("AddURIs() error = nil, want an error for a short response")
+	}
+	for i, gid := range gids {
+		if gid != "" {
+			t.Errorf("gids[%d] = %q, want no gid recorded for a malformed response", i, gid)
+		}
+	}
+}
+
+func TestStopSurvivesAnUnresponsiveShutdown(t *testing.T) {
+	fake := newFakeRPC(t)
+	fake.on("aria2.shutdown", func([]any) (any, error) {
+		time.Sleep(500 * time.Millisecond)
+		return "OK", nil
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	// The daemon is busy flushing, so the reply arrives after the grace period:
+	// the caller falls back to killing the process.
+	if err := NewClient(fake.endpoint("secret")).Shutdown(ctx); err != nil {
+		t.Errorf("Shutdown() error = %v, want nil for a request that outlived the grace period", err)
+	}
+}
+
+func TestShutdownReportsHTTPFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	err := NewClient(Endpoint{URL: server.URL, Secret: "secret"}).Shutdown(context.Background())
+	if err == nil {
+		t.Fatal("Shutdown() error = nil, want the http failure reported")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("Shutdown() error = %q, want it to mention the status code", err)
 	}
 }

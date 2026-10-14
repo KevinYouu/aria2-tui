@@ -223,6 +223,11 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
+	// Guard the fixed indexing below: a truncated response must be an error,
+	// not a panic inside the polling command.
+	if len(results) != len(calls) {
+		return Snapshot{}, fmt.Errorf("aria2 returned %d results for %d calls", len(results), len(calls))
+	}
 
 	var snap Snapshot
 	if err := decodeTasks(results[0], &snap.Active); err != nil {
@@ -285,6 +290,13 @@ func (c *Client) AddURIs(ctx context.Context, uris []string, opts map[string]str
 			}
 			continue
 		}
+		if len(results) != len(chunk) {
+			err := fmt.Errorf("aria2 returned %d results for %d calls", len(results), len(chunk))
+			for _, uri := range chunk {
+				failures = append(failures, fmt.Errorf("%s: %w", uri, err))
+			}
+			continue
+		}
 		for i, result := range results {
 			var gid string
 			if err := result.decode(&gid); err != nil {
@@ -340,13 +352,17 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 }
 
 // Shutdown asks the daemon to exit. aria2 closes the connection while
-// answering, so a transport error means the request was accepted and only an
-// RPC level failure is reported.
+// answering, so a transport error - or a request that outlived the shutdown
+// grace because the daemon was already flushing a download - means the request
+// was accepted. Every other failure is reported.
 func (c *Client) Shutdown(ctx context.Context) error {
 	err := c.call(ctx, "aria2.shutdown", c.params(), nil)
-	var rpcErr *rpcError
-	if err != nil && !errors.As(err, &rpcErr) {
+	switch {
+	case err == nil:
 		return nil
+	case isConnectionError(err), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		return nil
+	default:
+		return err
 	}
-	return err
 }
