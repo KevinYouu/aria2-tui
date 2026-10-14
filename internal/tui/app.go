@@ -265,6 +265,12 @@ func waitForDaemonCmd(done <-chan struct{}) tea.Cmd {
 
 // applySnapshot stores a successful snapshot and arms the next poll.
 func (a *App) applySnapshot(msg snapshotMsg) tea.Cmd {
+	if a.daemonGone {
+		// The daemon is gone for good, so polling stops: a stream of transport
+		// errors would otherwise bury the exit message within a second.
+		return nil
+	}
+
 	if msg.err != nil {
 		a.setBanner(msg.err, bannerError)
 	} else {

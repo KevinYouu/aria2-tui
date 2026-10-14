@@ -362,6 +362,18 @@ func TestAppReportsDaemonExit(t *testing.T) {
 	if view := ansi.Strip(h.view()); !strings.Contains(view, "aria2c exited") {
 		t.Errorf("view = %q, want the daemon exit message", view)
 	}
+
+	// Failing polls must not bury the exit message or keep polling a daemon
+	// that cannot come back.
+	h.send(snapshotMsg{err: errors.New("system.multicall: dial tcp: connection refused")})
+
+	view := ansi.Strip(h.view())
+	if !strings.Contains(view, "aria2c exited") {
+		t.Errorf("view = %q, want the exit message kept", view)
+	}
+	if strings.Contains(view, "connection refused") {
+		t.Errorf("view = %q, want no transport error noise", view)
+	}
 }
 
 func TestAppShowsAndClearsSnapshotErrors(t *testing.T) {
