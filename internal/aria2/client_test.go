@@ -177,8 +177,7 @@ func (f *fakeRPC) handle(w http.ResponseWriter, r *http.Request) {
 // faultFrom renders a handler error as aria2 would: an rpcError keeps its own
 // code and message, anything else becomes a generic fault.
 func faultFrom(err error) (int, string) {
-	var rpcFault *rpcError
-	if errors.As(err, &rpcFault) {
+	if rpcFault, ok := errors.AsType[*rpcError](err); ok {
 		return rpcFault.Code, rpcFault.Message
 	}
 	return -32000, err.Error()
@@ -536,8 +535,7 @@ func TestVersionReportsRPCError(t *testing.T) {
 	})
 
 	_, err := NewClient(fake.endpoint("wrong")).Version(context.Background())
-	var rpcFault *rpcError
-	if !errors.As(err, &rpcFault) {
+	if _, ok := errors.AsType[*rpcError](err); !ok {
 		t.Fatalf("Version() error = %v, want an rpcError", err)
 	}
 }
@@ -576,8 +574,7 @@ func TestShutdownReportsRPCError(t *testing.T) {
 	})
 
 	err := NewClient(fake.endpoint("wrong")).Shutdown(context.Background())
-	var rpcFault *rpcError
-	if !errors.As(err, &rpcFault) {
+	if _, ok := errors.AsType[*rpcError](err); !ok {
 		t.Fatalf("Shutdown() error = %v, want an rpcError", err)
 	}
 }

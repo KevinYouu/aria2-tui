@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -52,12 +53,7 @@ func ParseURIs(text string) (links []string, invalid int) {
 
 func schemeAllowed(scheme string) bool {
 	scheme = strings.ToLower(scheme)
-	for _, allowed := range allowedSchemes {
-		if scheme == allowed {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allowedSchemes, scheme)
 }
 
 // addAction is what the paste view asks the app to do after a key press.

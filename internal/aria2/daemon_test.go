@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -69,12 +70,7 @@ func TestBuildArgsUsesProvidedPortAndSecret(t *testing.T) {
 }
 
 func hasArg(args []string, want string) bool {
-	for _, arg := range args {
-		if arg == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(args, want)
 }
 
 func TestFreePortReturnsUsablePort(t *testing.T) {
@@ -222,16 +218,14 @@ func TestRingBufferConcurrentWrites(t *testing.T) {
 	buffer := newRingBuffer(limit)
 	var wg sync.WaitGroup
 	for writer := range writers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range perWriter {
 				if _, err := buffer.Write([]byte(fmt.Sprintf("w%d-line\n", writer))); err != nil {
 					t.Errorf("Write() error = %v", err)
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

@@ -436,11 +436,9 @@ func TestAppHandlesRapidConcurrencyChanges(t *testing.T) {
 	var wg sync.WaitGroup
 	results := make(chan tea.Msg, len(cmds))
 	for _, cmd := range cmds {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			results <- cmd()
-		}()
+		})
 	}
 	wg.Wait()
 	close(results)

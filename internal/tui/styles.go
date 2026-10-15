@@ -76,6 +76,28 @@ func statusColor(status aria2.Status) color.Color {
 	}
 }
 
+// statusIcon returns a compact glyph indicating the task state.
+func statusIcon(status aria2.Status) string {
+	switch status {
+	case aria2.StatusActive:
+		return "●"
+	case aria2.StatusComplete:
+		return "✔"
+	case aria2.StatusPaused:
+		return "⏸"
+	case aria2.StatusError:
+		return "✖"
+	case aria2.StatusWaiting:
+		return "○"
+	default:
+		return "•"
+	}
+}
+
+func badgeStyle(status aria2.Status) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(statusColor(status)).Bold(true)
+}
+
 // newProgressBar renders the solid █░ bar: block characters are stable on old
 // conhost and need no glyph fallback.
 func newProgressBar() progress.Model {

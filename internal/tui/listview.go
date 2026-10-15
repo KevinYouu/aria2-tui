@@ -43,6 +43,9 @@ type listView struct {
 	maxConnections int
 	aria2Version   string
 	footer         footerLine
+	downloadDir    string
+	view           viewKind
+	add            *addModel
 }
 
 // update applies a key press and reports the app level action it maps to.
@@ -99,10 +102,7 @@ func (m *listModel) move(tasks []aria2.Task, delta int) {
 	if len(tasks) == 0 {
 		return
 	}
-	index := indexByGID(tasks, m.cursorGID)
-	if index < 0 {
-		index = 0
-	}
+	index := max(indexByGID(tasks, m.cursorGID), 0)
 	m.cursorGID = tasks[clampInt(index+delta, 0, len(tasks)-1)].GID
 }
 
@@ -139,20 +139,61 @@ func (m *listModel) view(in listView) string {
 	geometry := listGeometryFor(in.height, in.footer.set)
 
 	tasks := in.tasks
-	cursor := indexByGID(tasks, m.cursorGID)
-	if cursor < 0 {
-		cursor = 0
-	}
-	m.scrollTo(cursor, geometry.rows, len(tasks))
+	cursor := max(indexByGID(tasks, m.cursorGID), 0)
 
 	lines := make([]string, 0, in.height)
 	lines = append(lines, headerLine(appTitle, in.width))
 
-	if len(tasks) == 0 {
-		lines = append(lines, mutedStyle().Render(SafeTruncate("No downloads yet — press a to add links", in.width)))
+	if in.width >= splitMinTerminalWidth && in.height >= splitMinTerminalHeight {
+		// Two-column split dashboard layout
+		leftWidth := clampInt(in.width*45/100, 36, 60)
+		rightWidth := in.width - leftWidth
+		panelHeight := geometry.rows
+
+		innerRows := max(panelHeight-2, 1)
+		m.scrollTo(cursor, innerRows, len(tasks))
+
+		// Left: Task list
+		leftContent := make([]string, 0, innerRows)
+		if len(tasks) == 0 {
+			leftContent = append(leftContent, "", "  "+mutedStyle().Render("No downloads yet — press a to add links"))
+		} else {
+			for i := m.offset; i < len(tasks) && i < m.offset+innerRows; i++ {
+				leftContent = append(leftContent, renderLeftTaskRow(tasks[i], i == cursor, leftWidth-2))
+			}
+		}
+		leftTitle := fmt.Sprintf("Downloads (%d)", len(tasks))
+		leftBox := renderPanelBox(leftTitle, leftContent, leftWidth, panelHeight, in.view != viewAdd)
+
+		// Right: Task details or Add workbench
+		var rightBox []string
+		if in.view == viewAdd && in.add != nil {
+			rightContent := renderAddWorkbench(in.add, in.downloadDir, rightWidth-2, panelHeight-2)
+			rightBox = renderPanelBox("Add downloads", rightContent, rightWidth, panelHeight, true)
+		} else {
+			var selectedTask *aria2.Task
+			if t, ok := m.selected(tasks); ok {
+				selectedTask = &t
+			}
+			rightContent := renderTaskDetails(selectedTask, in.downloadDir, rightWidth-2, panelHeight-2)
+			rightTitle := "Task Details"
+			if selectedTask != nil {
+				rightTitle = "Task Details: " + displayName(*selectedTask, max(rightWidth-20, 10))
+			}
+			rightBox = renderPanelBox(rightTitle, rightContent, rightWidth, panelHeight, false)
+		}
+
+		splitRows := joinPanelLines(leftBox, rightBox, panelHeight)
+		lines = append(lines, splitRows...)
 	} else {
-		for i := m.offset; i < len(tasks) && i < m.offset+geometry.rows; i++ {
-			lines = append(lines, m.taskRow(in.width, tasks[i], i == cursor))
+		// Single-column fallback for narrow terminals
+		m.scrollTo(cursor, geometry.rows, len(tasks))
+		if len(tasks) == 0 {
+			lines = append(lines, mutedStyle().Render(SafeTruncate("No downloads yet — press a to add links", in.width)))
+		} else {
+			for i := m.offset; i < len(tasks) && i < m.offset+geometry.rows; i++ {
+				lines = append(lines, m.taskRow(in.width, tasks[i], i == cursor))
+			}
 		}
 	}
 
@@ -161,7 +202,11 @@ func (m *listModel) view(in listView) string {
 		lines = append(lines, in.footer.render(in.width))
 	}
 	if geometry.help {
-		lines = append(lines, RenderHelpBar(listHelpKeys(), in.width))
+		helpKeys := listHelpKeys()
+		if in.view == viewAdd {
+			helpKeys = addHelpKeys()
+		}
+		lines = append(lines, RenderHelpBar(helpKeys, in.width))
 	}
 	if in.height > 0 && len(lines) > in.height {
 		lines = lines[:in.height]

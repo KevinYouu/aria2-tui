@@ -295,10 +295,110 @@ func TestRowFitsTheTerminalWidth(t *testing.T) {
 
 	for _, width := range []int{20, 40, 60, 80, 100, 200} {
 		view := ansi.Strip(model.view(listView{tasks: tasks, width: width, height: 24, aria2Version: "1.37.0"}))
-		for _, line := range strings.Split(view, "\n") {
+		for line := range strings.SplitSeq(view, "\n") {
 			if got := ansi.StringWidth(line); got > width {
 				t.Errorf("width %d: line width %d exceeds the terminal:\n%s", width, got, line)
 			}
 		}
+	}
+}
+
+func TestDashboardRendersSplitPanesWhenWide(t *testing.T) {
+	model := newListModel()
+	tasks := []aria2.Task{{
+		GID:         "gid12345",
+		Name:        "ubuntu-24.04.iso",
+		Status:      aria2.StatusActive,
+		Total:       2 * 1024 * 1024 * 1024,
+		Completed:   1 * 1024 * 1024 * 1024,
+		Speed:       8 * 1024 * 1024,
+		Connections: 8,
+	}}
+	model.sync(tasks)
+
+	view := ansi.Strip(model.view(listView{
+		tasks:          tasks,
+		stat:           aria2.GlobalStat{DownloadSpeed: 8 * 1024 * 1024, NumActive: 1},
+		width:          100,
+		height:         24,
+		maxConnections: 5,
+		aria2Version:   "1.37.0",
+		downloadDir:    "/home/user/Downloads",
+		view:           viewList,
+	}))
+
+	for _, want := range []string{
+		"Downloads (1)",
+		"Task Details",
+		"ubuntu-24.04.iso",
+		"gid12345",
+		"50.0%",
+		"8.0 MiB/s",
+		"8 conn",
+		"/home/user/Downloads",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("split dashboard view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestDashboardRendersAddWorkbench(t *testing.T) {
+	model := newListModel()
+	add := newAddModel()
+	add.input.SetValue("https://example.com/file1.iso\nhttps://example.com/file2.iso")
+
+	tasks := []aria2.Task{{
+		GID:    "gid1",
+		Name:   "existing.iso",
+		Status: aria2.StatusActive,
+	}}
+	model.sync(tasks)
+
+	view := ansi.Strip(model.view(listView{
+		tasks:        tasks,
+		width:        100,
+		height:       24,
+		downloadDir:  "/home/user/Downloads",
+		view:         viewAdd,
+		add:          add,
+		aria2Version: "1.37.0",
+	}))
+
+	for _, want := range []string{
+		"Downloads (1)",
+		"Add downloads",
+		"Paste one link per line",
+		"Detected 2 link(s)",
+		"[ctrl+s] download",
+		"[esc] back",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("add workbench view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestDashboardTaskDetailsWithError(t *testing.T) {
+	model := newListModel()
+	tasks := []aria2.Task{{
+		GID:          "err_gid",
+		Name:         "broken.iso",
+		Status:       aria2.StatusError,
+		ErrorCode:    3,
+		ErrorMessage: "Resource not found",
+	}}
+	model.sync(tasks)
+
+	view := ansi.Strip(model.view(listView{
+		tasks:        tasks,
+		width:        100,
+		height:       24,
+		view:         viewList,
+		aria2Version: "1.37.0",
+	}))
+
+	if !strings.Contains(view, "Code 3: Resource not found") {
+		t.Errorf("view missing error diagnostics:\n%s", view)
 	}
 }

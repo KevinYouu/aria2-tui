@@ -172,11 +172,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (a *App) View() tea.View {
 	var content string
-	switch a.view {
-	case viewAdd:
-		content = a.add.view(a.width, a.height, a.footer())
-	default:
+	if a.width >= splitMinTerminalWidth && a.height >= splitMinTerminalHeight {
 		content = a.list.view(a.listView())
+	} else {
+		switch a.view {
+		case viewAdd:
+			content = a.add.view(a.width, a.height, a.footer())
+		default:
+			content = a.list.view(a.listView())
+		}
 	}
 
 	view := tea.NewView(content)
@@ -204,6 +208,9 @@ func (a *App) listView() listView {
 		maxConnections: a.config.MaxConcurrentDownloads,
 		aria2Version:   a.deps.Aria2Version,
 		footer:         a.footer(),
+		downloadDir:    a.config.DownloadDir,
+		view:           a.view,
+		add:            a.add,
 	}
 }
 
