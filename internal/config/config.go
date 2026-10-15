@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/KevinYouu/aria2-tui/internal/theme"
@@ -19,6 +21,20 @@ const (
 	DefaultConcurrentDownloads = 5
 )
 
+// Limits and defaults of the per download connection settings; aria2 accepts
+// 1-16 for both.
+const (
+	MinConnections            = 1
+	MaxConnections            = 16
+	DefaultConnectionPerHost  = 16
+	DefaultSplit              = 16
+	DefaultMinSplitSize       = "4M"
+	DefaultDownloadSpeedLimit = "0"
+)
+
+// sizePattern matches an aria2 size such as 0, 512K, 4M or 1G.
+var sizePattern = regexp.MustCompile(`^[0-9]+[KkMmGg]?$`)
+
 const (
 	fileName = ".aria2-tui.json"
 	filePerm = 0o600
@@ -30,6 +46,17 @@ type Config struct {
 	MaxConcurrentDownloads int        `json:"max_concurrent_downloads"`
 	Aria2cPath             string     `json:"aria2c_path"`
 	Theme                  theme.Mode `json:"theme"`
+
+	// MaxConnectionPerServer and Split bound the connections of one download
+	// (aria2 max-connection-per-server and split).
+	MaxConnectionPerServer int `json:"max_connection_per_server"`
+	Split                  int `json:"split"`
+	// MinSplitSize is the smallest chunk worth a separate connection, e.g. 4M.
+	MinSplitSize string `json:"min_split_size"`
+	// DownloadLimit caps the overall download speed, e.g. 2M; 0 is unlimited.
+	DownloadLimit string `json:"download_limit"`
+	// Proxy is an optional proxy for all protocols, e.g. http://127.0.0.1:7890.
+	Proxy string `json:"proxy"`
 }
 
 // Default returns the configuration used when no file exists yet.
@@ -38,6 +65,10 @@ func Default() Config {
 		DownloadDir:            defaultDownloadDir(),
 		MaxConcurrentDownloads: DefaultConcurrentDownloads,
 		Theme:                  theme.ModeAuto,
+		MaxConnectionPerServer: DefaultConnectionPerHost,
+		Split:                  DefaultSplit,
+		MinSplitSize:           DefaultMinSplitSize,
+		DownloadLimit:          DefaultDownloadSpeedLimit,
 	}
 }
 
@@ -144,6 +175,25 @@ func (c Config) Validate() (Config, error) {
 		c.Theme = theme.ModeAuto
 	}
 
+	c.MaxConnectionPerServer = clamp(c.MaxConnectionPerServer, MinConnections, MaxConnections)
+	c.Split = clamp(c.Split, MinConnections, MaxConnections)
+
+	c.MinSplitSize = strings.ToUpper(strings.TrimSpace(c.MinSplitSize))
+	if c.MinSplitSize == "" {
+		c.MinSplitSize = DefaultMinSplitSize
+	}
+	if !sizePattern.MatchString(c.MinSplitSize) {
+		return Config{}, fmt.Errorf("invalid min split size %q: use a number with an optional K, M or G suffix", c.MinSplitSize)
+	}
+	c.DownloadLimit = strings.ToUpper(strings.TrimSpace(c.DownloadLimit))
+	if c.DownloadLimit == "" {
+		c.DownloadLimit = DefaultDownloadSpeedLimit
+	}
+	if !sizePattern.MatchString(c.DownloadLimit) {
+		return Config{}, fmt.Errorf("invalid download limit %q: use 0 or a number with an optional K, M or G suffix", c.DownloadLimit)
+	}
+	c.Proxy = strings.TrimSpace(c.Proxy)
+
 	aria2cPath, err := expandHome(strings.TrimSpace(c.Aria2cPath))
 	if err != nil {
 		return Config{}, err
@@ -151,6 +201,19 @@ func (c Config) Validate() (Config, error) {
 	c.Aria2cPath = aria2cPath
 
 	return c, nil
+}
+
+// Aria2Options returns the aria2 options that mirror this configuration,
+// except the download directory and the concurrency which have their own
+// handling. The values are applied at daemon start and on every change.
+func (c Config) Aria2Options() map[string]string {
+	return map[string]string{
+		"max-connection-per-server":  strconv.Itoa(c.MaxConnectionPerServer),
+		"split":                      strconv.Itoa(c.Split),
+		"min-split-size":             c.MinSplitSize,
+		"max-overall-download-limit": c.DownloadLimit,
+		"all-proxy":                  c.Proxy,
+	}
 }
 
 // expandHome replaces a leading ~ with the user's home directory.

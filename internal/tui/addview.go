@@ -146,13 +146,13 @@ func (m *addModel) view(width, height int, footer footerLine) string {
 
 	valid, invalid := m.links()
 	if len(valid) > 0 {
-		statusText := lipgloss.NewStyle().Foreground(theme.SuccessColor).Render(fmt.Sprintf("✓ Detected %d link(s)", len(valid)))
+		statusText := lipgloss.NewStyle().Foreground(theme.SuccessColor).Render(fmt.Sprintf("√ Detected %d link(s)", len(valid)))
 		if invalid > 0 {
 			statusText += "  " + lipgloss.NewStyle().Foreground(theme.WarningColor).Render(fmt.Sprintf("(%d invalid)", invalid))
 		}
 		contentLines = append(contentLines, "  "+statusText)
 	} else if invalid > 0 {
-		statusText := lipgloss.NewStyle().Foreground(theme.WarningColor).Render(fmt.Sprintf("⚠ %d invalid line(s)", invalid))
+		statusText := lipgloss.NewStyle().Foreground(theme.WarningColor).Render(fmt.Sprintf("! %d invalid line(s)", invalid))
 		contentLines = append(contentLines, "  "+statusText)
 	}
 

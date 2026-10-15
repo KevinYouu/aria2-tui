@@ -337,6 +337,12 @@ func (c *Client) SetMaxConcurrent(ctx context.Context, n int) error {
 	}), nil)
 }
 
+// SetGlobalOptions applies aria2 options to the running daemon; they affect
+// downloads added from now on (and, for the limits, running ones).
+func (c *Client) SetGlobalOptions(ctx context.Context, options map[string]string) error {
+	return c.call(ctx, "aria2.changeGlobalOption", c.params(options), nil)
+}
+
 // Version returns the daemon version; it doubles as the readiness probe.
 func (c *Client) Version(ctx context.Context) (string, error) {
 	var result struct {

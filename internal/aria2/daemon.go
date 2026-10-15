@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -41,6 +43,9 @@ type StartOptions struct {
 	Port int
 	// Secret is the RPC secret; empty generates a random one.
 	Secret string
+	// Options are extra aria2 options (name without dashes); empty values are
+	// skipped so an unset proxy does not reach the command line.
+	Options map[string]string
 }
 
 // Daemon is a private aria2c process owned by this session.
@@ -118,7 +123,7 @@ func Start(ctx context.Context, opts StartOptions) (*Daemon, error) {
 // depends on is set explicitly because aria2 loads the user's aria2.conf too,
 // and a stray daemon=true or continue=false there would break this session.
 func buildArgs(opts StartOptions, port int, secret string) []string {
-	return []string{
+	args := []string{
 		"--enable-rpc=true",
 		"--rpc-listen-all=false",
 		fmt.Sprintf("--rpc-listen-port=%d", port),
@@ -135,6 +140,12 @@ func buildArgs(opts StartOptions, port int, secret string) []string {
 		// A download manager must not keep seeding after the download.
 		"--seed-time=0",
 	}
+	for _, name := range slices.Sorted(maps.Keys(opts.Options)) {
+		if value := opts.Options[name]; value != "" {
+			args = append(args, "--"+name+"="+value)
+		}
+	}
+	return args
 }
 
 // wait reaps the process; it runs for the daemon's whole lifetime.

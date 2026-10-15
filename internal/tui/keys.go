@@ -20,6 +20,7 @@ var (
 
 	keySwitchPane = key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "switch pane"))
 	keyAddLinks   = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add links"))
+	keySettings   = key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "settings"))
 
 	keySubmit = key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "download"))
 	keyBack   = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))
@@ -37,6 +38,7 @@ func listHelpKeys() []HelpKey {
 		keyMoreConnections,
 		keySwitchPane,
 		keyAddLinks,
+		keySettings,
 		keyQuitList,
 	)
 }

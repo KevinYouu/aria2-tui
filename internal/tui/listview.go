@@ -22,6 +22,7 @@ const (
 	listMoreConnections
 	listFewerConnections
 	listSwitchPane
+	listSettings
 )
 
 // listModel is the download list state: the selected download and the first
@@ -72,6 +73,8 @@ func (m *listModel) update(msg tea.KeyPressMsg, tasks []aria2.Task, rows int) li
 		return listSwitchPane
 	case key.Matches(msg, keyAddLinks):
 		return listAddLinks
+	case key.Matches(msg, keySettings):
+		return listSettings
 	case key.Matches(msg, keyQuitList):
 		return listQuit
 	}
@@ -287,7 +290,7 @@ func (m *listModel) taskRow(width int, task aria2.Task, selected bool) string {
 
 	cursor := "  "
 	if selected {
-		cursor = cursorStyle().Render("❯") + " "
+		cursor = cursorStyle().Render("►") + " "
 	}
 	segments := []string{cursor, nameStyle(selected).Render(padRight(displayName(task, columns.nameWidth), columns.nameWidth))}
 

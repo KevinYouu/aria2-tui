@@ -110,7 +110,7 @@ func renderLeftTaskRow(task aria2.Task, selected bool, width int) string {
 
 	cursor := "  "
 	if selected {
-		cursor = cursorStyle().Render("❯") + " "
+		cursor = cursorStyle().Render("►") + " "
 	}
 
 	icon := statusStyle(task.Status).Render(statusIcon(task.Status)) + " "
@@ -143,7 +143,20 @@ func renderLeftTaskRow(task aria2.Task, selected bool, width int) string {
 	return row
 }
 
-// renderTaskDetails generates detail lines for the right pane inspector.
+// detailRow is one label/value line of the inspector; the value is rendered
+// once the width left after the label column is known.
+type detailRow struct {
+	label string
+	value func(width int) string
+}
+
+func fixedValue(text string) func(int) string {
+	return func(int) string { return text }
+}
+
+// renderTaskDetails generates detail lines for the right pane inspector. The
+// label column is as wide as the longest label shown, so every label is
+// complete whenever the pane can hold it.
 func renderTaskDetails(task *aria2.Task, downloadDir string, width, height int) []string {
 	if task == nil {
 		lines := []string{}
@@ -155,88 +168,83 @@ func renderTaskDetails(task *aria2.Task, downloadDir string, width, height int) 
 	}
 
 	ratio := progressRatio(*task)
-	lines := make([]string, 0, max(height, 12))
-
-	formatField := func(label, value string) string {
-		labelCol := padRight("  "+label, 12)
-		return mutedStyle().Render(labelCol) + value
+	rows := make([]detailRow, 0, 12)
+	add := func(label string, value func(int) string) {
+		rows = append(rows, detailRow{label: label, value: value})
 	}
 
-	// 1. Name
-	lines = append(lines, formatField("Name", titleStyle().Render(displayName(*task, max(width-14, 8)))))
-
-	// 2. Status
-	statusVal := statusStyle(task.Status).Render(statusIcon(task.Status)+" "+statusLabel(task.Status)) + " " +
-		badgeStyle(task.Status).Render("["+strings.ToUpper(statusLabel(task.Status))+"]")
-	lines = append(lines, formatField("Status", statusVal))
-
-	// For tight vertical space (e.g. narrow vertical stacked layout), combine fields
-	if height <= 6 {
-		sizeText := fmt.Sprintf("%s / %s (%s)", formatBytes(task.Completed), formatBytes(task.Total), percentLabel(ratio))
-		lines = append(lines, formatField("Progress", sizeText))
-
-		speedEta := "↓ " + formatSpeed(task.Speed) + "  ETA " + formatETA(*task)
-		lines = append(lines, formatField("Speed", speedEta))
-
-		connVal := connectionsLabel(*task)
-		if connVal == "" {
-			connVal = "0 conn"
-		}
-		lines = append(lines, formatField("Connections", connVal))
-
-		if task.ErrorCode != 0 || task.ErrorMessage != "" {
-			errText := fmt.Sprintf("Code %d: %s", task.ErrorCode, task.ErrorMessage)
-			lines = append(lines, formatField("Error", lipgloss.NewStyle().Foreground(theme.ErrorColor).Bold(true).Render(errText)))
-		}
-		return lines
-	}
-
-	// 3. GID
-	lines = append(lines, formatField("GID", mutedStyle().Render(task.GID)))
-
-	// 4. Progress bar
-	barW := clampInt(width-28, 8, 24)
-	bar := newProgressBar()
-	bar.SetWidth(barW)
-	progressVal := bar.ViewAs(ratio) + " " + mutedStyle().Render(percentLabel(ratio))
-	lines = append(lines, formatField("Progress", progressVal))
-
-	// 5. Size
-	sizeText := fmt.Sprintf("%s / %s", formatBytes(task.Completed), formatBytes(task.Total))
-	if task.Total > task.Completed && task.Total > 0 {
-		sizeText += fmt.Sprintf(" (remaining: %s)", formatBytes(task.Total-task.Completed))
-	}
-	lines = append(lines, formatField("Size", sizeText))
-
-	// 6. Transfer speed & ETA
-	speedVal := "↓ " + formatSpeed(task.Speed)
-	lines = append(lines, formatField("Speed", speedVal))
-
-	etaVal := "ETA " + formatETA(*task)
-	lines = append(lines, formatField("ETA", etaVal))
-
-	// 7. Connections
 	connVal := connectionsLabel(*task)
 	if connVal == "" {
 		connVal = "0 conn"
 	}
-	lines = append(lines, formatField("Connections", connVal))
+	errorRow := func() {
+		errText := fmt.Sprintf("Code %d: %s", task.ErrorCode, task.ErrorMessage)
+		add("Error", func(w int) string {
+			return lipgloss.NewStyle().Foreground(theme.ErrorColor).Bold(true).Render(SafeTruncate(errText, w))
+		})
+	}
 
-	// 8. Target Directory
+	add("Name", func(w int) string { return titleStyle().Render(displayName(*task, max(w, 8))) })
+	add("Status", fixedValue(statusStyle(task.Status).Render(statusIcon(task.Status)+" "+statusLabel(task.Status))+" "+
+		badgeStyle(task.Status).Render("["+strings.ToUpper(statusLabel(task.Status))+"]")))
+
+	hasError := task.ErrorCode != 0 || task.ErrorMessage != ""
+
+	// For tight vertical space (e.g. narrow vertical stacked layout), combine fields
+	if height <= 6 {
+		add("Progress", fixedValue(fmt.Sprintf("%s / %s (%s)", formatBytes(task.Completed), formatBytes(task.Total), percentLabel(ratio))))
+		add("Speed", fixedValue("↓ "+formatSpeed(task.Speed)+"  ETA "+formatETA(*task)))
+		add("Connections", fixedValue(connVal))
+		if hasError {
+			errorRow()
+		}
+		return layoutDetailRows(rows, width)
+	}
+
+	add("GID", fixedValue(mutedStyle().Render(task.GID)))
+	add("Progress", func(w int) string {
+		bar := newProgressBar()
+		bar.SetWidth(clampInt(w-6, 8, 24))
+		return bar.ViewAs(ratio) + " " + mutedStyle().Render(percentLabel(ratio))
+	})
+
+	sizeText := fmt.Sprintf("%s / %s", formatBytes(task.Completed), formatBytes(task.Total))
+	if task.Total > task.Completed && task.Total > 0 {
+		sizeText += fmt.Sprintf(" (remaining: %s)", formatBytes(task.Total-task.Completed))
+	}
+	add("Size", fixedValue(sizeText))
+	add("Speed", fixedValue("↓ "+formatSpeed(task.Speed)))
+	add("ETA", fixedValue("ETA "+formatETA(*task)))
+	add("Connections", fixedValue(connVal))
+
 	targetDir := downloadDir
 	if targetDir == "" {
 		targetDir = "~/Downloads"
 	}
-	lines = append(lines, formatField("Save Dir", SafeTruncate(targetDir, max(width-16, 10))))
+	add("Save Dir", func(w int) string { return SafeTruncate(targetDir, max(w, 10)) })
 
-	// 9. Error info
-	if task.ErrorCode != 0 || task.ErrorMessage != "" {
-		errText := fmt.Sprintf("Code %d: %s", task.ErrorCode, task.ErrorMessage)
-		lines = append(lines, formatField("Error", lipgloss.NewStyle().Foreground(theme.ErrorColor).Bold(true).Render(errText)))
+	if hasError {
+		errorRow()
 	} else {
-		lines = append(lines, formatField("Diagnostics", theme.InfoStyle.Render("None (Healthy)")))
+		add("Diagnostics", fixedValue(theme.InfoStyle.Render("None (Healthy)")))
 	}
+	return layoutDetailRows(rows, width)
+}
 
+// layoutDetailRows measures the label column from the rows themselves and
+// renders each value into the width that remains.
+func layoutDetailRows(rows []detailRow, width int) []string {
+	labelWidth := 0
+	for _, row := range rows {
+		labelWidth = max(labelWidth, ansi.StringWidth(row.label))
+	}
+	labelCol := labelWidth + 4 // two spaces of indent and two of gap
+
+	lines := make([]string, 0, len(rows))
+	for _, row := range rows {
+		label := padRight("  "+row.label, labelCol)
+		lines = append(lines, mutedStyle().Render(label)+row.value(width-labelCol))
+	}
 	return lines
 }
 
@@ -267,13 +275,13 @@ func renderAddWorkbench(add *addModel, downloadDir string, width, height int) []
 	// Real-time link diagnostics (only shown when links are detected or invalid)
 	valid, invalid := add.links()
 	if len(valid) > 0 {
-		statusText := lipgloss.NewStyle().Foreground(theme.SuccessColor).Render(fmt.Sprintf("✓ Detected %d link(s)", len(valid)))
+		statusText := lipgloss.NewStyle().Foreground(theme.SuccessColor).Render(fmt.Sprintf("√ Detected %d link(s)", len(valid)))
 		if invalid > 0 {
 			statusText += "  " + lipgloss.NewStyle().Foreground(theme.WarningColor).Render(fmt.Sprintf("(%d invalid)", invalid))
 		}
 		lines = append(lines, "", "  "+statusText)
 	} else if invalid > 0 {
-		statusText := lipgloss.NewStyle().Foreground(theme.WarningColor).Render(fmt.Sprintf("⚠ %d invalid line(s)", invalid))
+		statusText := lipgloss.NewStyle().Foreground(theme.WarningColor).Render(fmt.Sprintf("! %d invalid line(s)", invalid))
 		lines = append(lines, "", "  "+statusText)
 	}
 

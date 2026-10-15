@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/KevinYouu/aria2-tui/internal/aria2"
 	"github.com/KevinYouu/aria2-tui/internal/config"
+	"github.com/KevinYouu/aria2-tui/internal/theme"
 )
 
 const (
@@ -22,6 +25,10 @@ const (
 	// addTimeout bounds submitting pasted links, which can take longer than a
 	// status query while aria2 fetches torrent or metalink metadata.
 	addTimeout = 30 * time.Second
+
+	// noticeLifetime is how long an informational message stays visible; it
+	// is cleared by the next snapshot poll after that.
+	noticeLifetime = 4 * time.Second
 
 	// defaultTermWidth and defaultTermHeight keep the views sane before the
 	// terminal reports its size; the tests rely on them too.
@@ -48,6 +55,7 @@ type viewKind int
 const (
 	viewList viewKind = iota
 	viewAdd
+	viewSettings
 )
 
 // Run starts the TUI and returns once the user quits. ErrInterrupted and
@@ -76,6 +84,14 @@ type (
 		value int
 		err   error
 	}
+	settingsMsg struct {
+		cfg      config.Config
+		previous config.Config
+		notice   string
+		err      error
+		// rolledBack is set when aria2 rejected the change.
+		rolledBack bool
+	}
 	daemonExitMsg struct{}
 	tickMsg       struct{}
 )
@@ -87,15 +103,17 @@ type App struct {
 	deps   Deps
 	config config.Config
 
-	list *listModel
-	add  *addModel
-	view viewKind
+	list     *listModel
+	add      *addModel
+	settings *settingsModel
+	view     viewKind
 
 	width, height int
 	snapshot      aria2.Snapshot
 
 	banner     string
 	bannerKind bannerKind
+	bannerAt   time.Time
 	// confirmQuit is set while the inline quit confirmation is waiting for an
 	// answer.
 	confirmQuit bool
@@ -113,6 +131,7 @@ func newApp(ctx context.Context, deps Deps) *App {
 		config:     deps.Config,
 		list:       newListModel(),
 		add:        newAddModel(),
+		settings:   newSettingsModel(),
 		view:       viewList,
 		width:      defaultTermWidth,
 		height:     defaultTermHeight,
@@ -154,6 +173,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case concurrencyMsg:
 		a.applyConcurrency(msg)
 		return a, nil
+	case settingsMsg:
+		a.applySettingsResult(msg)
+		return a, nil
 	case daemonExitMsg:
 		a.daemonGone = true
 		a.setBanner(errors.New("aria2c exited; restart aria2-tui to continue downloading"), bannerError)
@@ -162,6 +184,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.handleKey(msg)
 	}
 
+	if a.view == viewSettings {
+		var cmd tea.Cmd
+		a.settings.input, cmd = a.settings.input.Update(msg)
+		return a, cmd
+	}
 	if a.view == viewAdd {
 		if _, cmd := a.add.update(msg); cmd != nil {
 			return a, cmd
@@ -171,7 +198,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) View() tea.View {
-	content := a.list.view(a.listView())
+	var content string
+	if a.view == viewSettings {
+		content = a.settings.view(a.width, a.height, a.config, a.footer())
+	} else {
+		content = a.list.view(a.listView())
+	}
 	view := tea.NewView(content)
 	view.AltScreen = true
 	view.WindowTitle = appTitle
@@ -223,12 +255,14 @@ func (a *App) setBanner(err error, kind bannerKind) {
 	}
 	a.banner = err.Error()
 	a.bannerKind = kind
+	a.bannerAt = time.Now()
 }
 
 // setNotice shows an informational message.
 func (a *App) setNotice(notice string) {
 	a.banner = notice
 	a.bannerKind = bannerInfo
+	a.bannerAt = time.Now()
 }
 
 func (a *App) applyAction(msg actionMsg) {
@@ -261,6 +295,9 @@ func waitForDaemonCmd(done <-chan struct{}) tea.Cmd {
 
 // applySnapshot stores a successful snapshot and arms the next poll.
 func (a *App) applySnapshot(msg snapshotMsg) tea.Cmd {
+	if a.banner != "" && a.bannerKind == bannerInfo && time.Since(a.bannerAt) > noticeLifetime {
+		a.banner = ""
+	}
 	if a.daemonGone {
 		// The daemon is gone for good, so polling stops: a stream of transport
 		// errors would otherwise bury the exit message within a second.
@@ -299,6 +336,22 @@ func (a *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
+	if a.view == viewSettings {
+		result, cmd := a.settings.update(msg, a.config)
+		switch result.action {
+		case settingsBack:
+			a.view = viewList
+		case settingsQuit:
+			return a.requestQuit()
+		case settingsChanged:
+			return a.applySettingsCmd(result)
+		}
+		if result.err != nil {
+			a.setBanner(result.err, bannerError)
+		}
+		return cmd
+	}
+
 	if a.view == viewAdd {
 		action, cmd := a.add.update(msg)
 		switch action {
@@ -320,6 +373,9 @@ func (a *App) handleListKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch a.list.update(msg, a.snapshot.Tasks(), geometry.rows) {
 	case listQuit:
 		return a.requestQuit()
+	case listSettings:
+		a.view = viewSettings
+		return nil
 	case listSwitchPane, listAddLinks:
 		a.view = viewAdd
 		return nil
@@ -478,6 +534,68 @@ func (a *App) applyConcurrency(msg concurrencyMsg) {
 		return
 	}
 	a.setNotice(fmt.Sprintf("max concurrent downloads: %d", msg.value))
+}
+
+// applySettingsCmd validates a changed configuration, adopts it right away and
+// pushes it to aria2 and the config file in the background. The previous
+// configuration is captured so a rejection by aria2 can roll back.
+func (a *App) applySettingsCmd(result settingsResult) tea.Cmd {
+	previous := a.config
+	next, err := result.cfg.Validate()
+	if err != nil {
+		a.setBanner(err, bannerError)
+		return nil
+	}
+	if next == previous {
+		return nil
+	}
+
+	a.config = next
+	if next.Theme != previous.Theme {
+		theme.ApplyMode(next.Theme)
+		text := a.add.input.Value()
+		a.add = newAddModel()
+		a.add.input.SetValue(text)
+	}
+
+	options := next.Aria2Options()
+	options["dir"] = next.DownloadDir
+	options["max-concurrent-downloads"] = strconv.Itoa(next.MaxConcurrentDownloads)
+	restart := next.Aria2cPath != previous.Aria2cPath
+	notice := result.label + " saved"
+	if restart {
+		notice += " (restart to apply)"
+	}
+
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(a.ctx, rpcTimeout)
+		defer cancel()
+
+		if err := os.MkdirAll(next.DownloadDir, 0o755); err != nil {
+			return settingsMsg{cfg: previous, previous: next, err: fmt.Errorf("create download directory: %w", err), rolledBack: true}
+		}
+		if err := a.deps.Client.SetGlobalOptions(ctx, options); err != nil {
+			return settingsMsg{cfg: previous, previous: next, err: err, rolledBack: true}
+		}
+		if err := a.deps.Store.Save(next); err != nil {
+			return settingsMsg{cfg: next, previous: previous, err: err}
+		}
+		return settingsMsg{cfg: next, previous: previous, notice: notice}
+	}
+}
+
+func (a *App) applySettingsResult(msg settingsMsg) {
+	if msg.rolledBack {
+		a.config = msg.cfg
+		if msg.cfg.Theme != msg.previous.Theme {
+			theme.ApplyMode(msg.cfg.Theme)
+		}
+	}
+	if msg.err != nil {
+		a.setBanner(msg.err, bannerError)
+		return
+	}
+	a.setNotice(msg.notice)
 }
 
 // plural picks the singular or plural suffix for count.

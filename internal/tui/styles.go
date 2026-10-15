@@ -82,11 +82,11 @@ func statusIcon(status aria2.Status) string {
 	case aria2.StatusActive:
 		return "●"
 	case aria2.StatusComplete:
-		return "✔"
+		return "√"
 	case aria2.StatusPaused:
-		return "⏸"
+		return "="
 	case aria2.StatusError:
-		return "✖"
+		return "×"
 	case aria2.StatusWaiting:
 		return "○"
 	default:
@@ -125,12 +125,12 @@ func headerLine(title string, width int) string {
 func bannerLine(text string, kind bannerKind, width int) string {
 	text = strings.Join(strings.Fields(text), " ")
 
-	style, iconStyle, icon := theme.InfoStyle, theme.InfoIconStyle, "ℹ"
+	style, iconStyle, icon := theme.InfoStyle, theme.InfoIconStyle, "i"
 	switch kind {
 	case bannerWarn:
-		style, iconStyle, icon = theme.WarningStyle, theme.WarningIconStyle, "⚠"
+		style, iconStyle, icon = theme.WarningStyle, theme.WarningIconStyle, "!"
 	case bannerError:
-		style, iconStyle, icon = theme.ErrorStyle, theme.ErrorIconStyle, "✗"
+		style, iconStyle, icon = theme.ErrorStyle, theme.ErrorIconStyle, "×"
 	}
 	return SafeTruncate(iconStyle.Render(icon)+" "+style.Render(text), width)
 }

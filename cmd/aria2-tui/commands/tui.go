@@ -40,6 +40,7 @@ func RunTUI(ctx context.Context, links []string) error {
 		BinaryPath:             cfg.Aria2cPath,
 		DownloadDir:            cfg.DownloadDir,
 		MaxConcurrentDownloads: cfg.MaxConcurrentDownloads,
+		Options:                cfg.Aria2Options(),
 	})
 	if err != nil {
 		return err
