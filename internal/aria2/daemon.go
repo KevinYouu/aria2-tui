@@ -25,6 +25,8 @@ const (
 	// shutdownGrace bounds the wait for a clean RPC shutdown before the
 	// process is killed.
 	shutdownGrace = 5 * time.Second
+	// terminateWait is how long Terminate waits for an immediate exit.
+	terminateWait = 50 * time.Millisecond
 	// logTailBytes bounds the captured daemon output.
 	logTailBytes = 8 << 10
 	// secretBytes is the length of the per session RPC secret.
@@ -139,6 +141,9 @@ func buildArgs(opts StartOptions, port int, secret string) []string {
 		"--console-log-level=warn",
 		// A download manager must not keep seeding after the download.
 		"--seed-time=0",
+		// Progress is saved this often, so ending the session without waiting
+		// for aria2 loses at most a few seconds of resume data.
+		"--auto-save-interval=5",
 	}
 	for _, name := range slices.Sorted(maps.Keys(opts.Options)) {
 		if value := opts.Options[name]; value != "" {
@@ -251,6 +256,30 @@ func (d *Daemon) Stop(ctx context.Context) error {
 		return fmt.Errorf("kill aria2c: %w", err)
 	}
 	<-d.done
+	return nil
+}
+
+// Terminate asks the daemon to exit and returns without waiting for it: aria2
+// needs about a second to notice the signal, and the caller is about to exit
+// anyway. aria2 saves its control files and quits on its own, and
+// --stop-with-process ends it should it get stuck. Where signals cannot be
+// delivered it falls back to the slower Stop.
+func (d *Daemon) Terminate(ctx context.Context) error {
+	if d == nil {
+		return nil
+	}
+	select {
+	case <-d.done:
+		return nil
+	default:
+	}
+	if err := d.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		return d.Stop(ctx)
+	}
+	select {
+	case <-d.done:
+	case <-time.After(terminateWait):
+	}
 	return nil
 }
 

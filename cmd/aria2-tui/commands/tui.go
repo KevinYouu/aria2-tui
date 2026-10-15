@@ -51,7 +51,7 @@ func RunTUI(ctx context.Context, links []string) error {
 		// gets a fresh deadline of its own.
 		stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
-		if err := daemon.Stop(stopCtx); err != nil {
+		if err := daemon.Terminate(stopCtx); err != nil {
 			logs.Warning(err.Error())
 		}
 	}()
