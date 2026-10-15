@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -222,7 +223,12 @@ func (d *Daemon) Stop(ctx context.Context) error {
 	shutdownCtx, cancel := context.WithTimeout(ctx, shutdownGrace)
 	defer cancel()
 
-	_ = d.client.Shutdown(shutdownCtx)
+	// aria2 delays an RPC shutdown by several seconds, while SIGTERM makes it
+	// save its state and exit within about a second. Windows cannot deliver
+	// SIGTERM, so it falls back to the RPC call.
+	if err := d.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		_ = d.client.Shutdown(shutdownCtx)
+	}
 
 	select {
 	case <-d.done:

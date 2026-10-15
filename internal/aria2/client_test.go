@@ -544,7 +544,7 @@ func TestVersionReportsRPCError(t *testing.T) {
 // must not be reported as a failure.
 func TestShutdownToleratesClosedConnection(t *testing.T) {
 	fake := newFakeRPC(t)
-	fake.on("aria2.shutdown", func([]any) (any, error) {
+	fake.on("aria2.forceShutdown", func([]any) (any, error) {
 		return nil, nil
 	})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -569,7 +569,7 @@ func TestShutdownToleratesClosedConnection(t *testing.T) {
 
 func TestShutdownReportsRPCError(t *testing.T) {
 	fake := newFakeRPC(t)
-	fake.on("aria2.shutdown", func([]any) (any, error) {
+	fake.on("aria2.forceShutdown", func([]any) (any, error) {
 		return nil, &rpcError{Code: 1, Message: "Unauthorized"}
 	})
 
@@ -648,7 +648,7 @@ func TestAddURIsRejectsTruncatedMulticallResult(t *testing.T) {
 
 func TestStopSurvivesAnUnresponsiveShutdown(t *testing.T) {
 	fake := newFakeRPC(t)
-	fake.on("aria2.shutdown", func([]any) (any, error) {
+	fake.on("aria2.forceShutdown", func([]any) (any, error) {
 		time.Sleep(500 * time.Millisecond)
 		return "OK", nil
 	})

@@ -356,7 +356,9 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 // grace because the daemon was already flushing a download - means the request
 // was accepted. Every other failure is reported.
 func (c *Client) Shutdown(ctx context.Context) error {
-	err := c.call(ctx, "aria2.shutdown", c.params(), nil)
+	// forceShutdown skips the slow graceful wind-down (tracker announces,
+	// connection closing) but still persists the .aria2 control files.
+	err := c.call(ctx, "aria2.forceShutdown", c.params(), nil)
 	switch {
 	case err == nil:
 		return nil
