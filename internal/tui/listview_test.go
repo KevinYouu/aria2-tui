@@ -368,7 +368,7 @@ func TestDashboardRendersAddWorkbench(t *testing.T) {
 	for _, want := range []string{
 		"Downloads (1)",
 		"Add downloads",
-		"Paste one link per line",
+		"https://example.com/file1.iso",
 		"Detected 2 link(s)",
 		"[ctrl+s] download",
 		"[esc] back",
@@ -376,6 +376,20 @@ func TestDashboardRendersAddWorkbench(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Errorf("add workbench view missing %q:\n%s", want, view)
 		}
+	}
+
+	// When empty, verify placeholder is shown in the workbench
+	emptyAdd := newAddModel()
+	emptyView := ansi.Strip(model.view(listView{
+		tasks:        tasks,
+		width:        100,
+		height:       24,
+		view:         viewAdd,
+		add:          emptyAdd,
+		aria2Version: "1.37.0",
+	}))
+	if !strings.Contains(emptyView, "Paste one link per line") {
+		t.Errorf("empty add workbench view missing placeholder:\n%s", emptyView)
 	}
 }
 
@@ -400,5 +414,132 @@ func TestDashboardTaskDetailsWithError(t *testing.T) {
 
 	if !strings.Contains(view, "Code 3: Resource not found") {
 		t.Errorf("view missing error diagnostics:\n%s", view)
+	}
+}
+
+func TestNarrowLayoutIsCompactWithoutExcessiveBlankLines(t *testing.T) {
+	model := newListModel()
+	tasks := []aria2.Task{
+		{GID: "g1", Name: "ubuntu.iso", Status: aria2.StatusActive, Total: 100, Completed: 50},
+		{GID: "g2", Name: "debian.iso", Status: aria2.StatusComplete, Total: 200, Completed: 200},
+	}
+	model.sync(tasks)
+
+	// Narrow terminal: width 60, height 24
+	view := ansi.Strip(model.view(listView{
+		tasks:        tasks,
+		width:        60,
+		height:       24,
+		view:         viewList,
+		aria2Version: "1.37.0",
+	}))
+
+	// Verify it renders card box titles for BOTH top (Downloads) and bottom (Task Details)
+	if !strings.Contains(view, "Downloads (2)") {
+		t.Errorf("narrow view missing top card box title:\n%s", view)
+	}
+	if !strings.Contains(view, "Task Details") {
+		t.Errorf("narrow view missing bottom card box title:\n%s", view)
+	}
+
+	// Verify line count is compact and does not fill entire 24 rows with empty blanks.
+	// Two stacked cards with borders + title + status + help takes 13 compact lines.
+	lines := strings.Split(view, "\n")
+	if len(lines) > 14 {
+		t.Errorf("narrow view with 2 tasks rendered %d lines, expected <= 14 compact lines:\n%s", len(lines), view)
+	}
+
+	// Also verify narrow add view in dashboard mode (vertical stacked: Top Downloads + Bottom Add downloads)
+	add := newAddModel()
+	narrowAddDashboard := ansi.Strip(model.view(listView{
+		tasks:        tasks,
+		width:        60,
+		height:       24,
+		view:         viewAdd,
+		add:          add,
+		aria2Version: "1.37.0",
+	}))
+	if !strings.Contains(narrowAddDashboard, "Downloads (2)") {
+		t.Errorf("narrow add dashboard missing top card:\n%s", narrowAddDashboard)
+	}
+	if !strings.Contains(narrowAddDashboard, "Add downloads") {
+		t.Errorf("narrow add dashboard missing bottom card:\n%s", narrowAddDashboard)
+	}
+	narrowAddLines := strings.Split(narrowAddDashboard, "\n")
+	if len(narrowAddLines) > 14 {
+		t.Errorf("narrow add dashboard rendered %d lines, expected <= 14 compact lines:\n%s", len(narrowAddLines), narrowAddDashboard)
+	}
+}
+
+func TestTabSwitchingDoesNotCauseLayoutJitter(t *testing.T) {
+	model := newListModel()
+	add := newAddModel()
+
+	scenarios := []struct {
+		name   string
+		width  int
+		height int
+		tasks  []aria2.Task
+	}{
+		{
+			name:   "wide_screen_empty",
+			width:  100,
+			height: 24,
+			tasks:  nil,
+		},
+		{
+			name:   "wide_screen_with_tasks",
+			width:  100,
+			height: 24,
+			tasks: []aria2.Task{
+				{GID: "g1", Name: "ubuntu.iso", Status: aria2.StatusActive, Total: 100, Completed: 50},
+			},
+		},
+		{
+			name:   "narrow_screen_empty",
+			width:  60,
+			height: 24,
+			tasks:  nil,
+		},
+		{
+			name:   "narrow_screen_with_tasks",
+			width:  60,
+			height: 24,
+			tasks: []aria2.Task{
+				{GID: "g1", Name: "ubuntu.iso", Status: aria2.StatusActive, Total: 100, Completed: 50},
+			},
+		},
+	}
+
+	for _, sc := range scenarios {
+		t.Run(sc.name, func(t *testing.T) {
+			model.sync(sc.tasks)
+
+			listViewOutput := ansi.Strip(model.view(listView{
+				tasks:        sc.tasks,
+				width:        sc.width,
+				height:       sc.height,
+				view:         viewList,
+				add:          add,
+				aria2Version: "1.37.0",
+			}))
+
+			addViewOutput := ansi.Strip(model.view(listView{
+				tasks:        sc.tasks,
+				width:        sc.width,
+				height:       sc.height,
+				view:         viewAdd,
+				add:          add,
+				aria2Version: "1.37.0",
+			}))
+
+			listLines := strings.Split(listViewOutput, "\n")
+			addLines := strings.Split(addViewOutput, "\n")
+
+			if len(listLines) != len(addLines) {
+				t.Errorf("[%s] line count jitter detected on tab switch: list has %d lines, add has %d lines\nList view:\n%s\nAdd view:\n%s",
+					sc.name, len(listLines), len(addLines), listViewOutput, addViewOutput)
+			}
+		})
 	}
 }

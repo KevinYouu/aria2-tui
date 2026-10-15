@@ -64,6 +64,7 @@ const (
 	addSubmit
 	addBack
 	addQuit
+	addSwitchPane
 )
 
 // addModel is the paste view: a multi line text area plus link parsing.
@@ -82,7 +83,7 @@ func newAddModel() *addModel {
 	styles.Cursor.Blink = false
 	input.SetStyles(styles)
 
-	input.Placeholder = "Paste one link per line"
+	input.Placeholder = "Paste one link per line (HTTP, HTTPS, FTP, Magnet)"
 	input.Prompt = ""
 	input.ShowLineNumbers = false
 	// A virtual cursor keeps the text area self contained: the block cursor is
@@ -102,6 +103,8 @@ func (m *addModel) update(msg tea.Msg) (addAction, tea.Cmd) {
 		switch {
 		case key.Matches(pressed, keySubmit):
 			return addSubmit, nil
+		case key.Matches(pressed, keySwitchPane):
+			return addSwitchPane, nil
 		case key.Matches(pressed, keyBack):
 			return addBack, nil
 		case key.Matches(pressed, keyQuit):
@@ -126,20 +129,47 @@ func (m *addModel) reset() {
 
 // view renders the paste view; footer is the shared app message line.
 func (m *addModel) view(width, height int, footer footerLine) string {
-	// Title, text area, footer and help bar, with one spare row so the text
-	// area cannot push the help bar off screen.
-	inputHeight := max(height-4, 3)
+	innerWidth := max(width-4, 10)
+	inputHeight := clampInt(height-7, 3, 5)
 	if width > 0 {
-		m.input.SetWidth(width)
+		m.input.SetWidth(innerWidth)
 	}
 	m.input.SetHeight(inputHeight)
 
-	lines := []string{headerLine("Add downloads", width), m.input.View()}
+	contentLines := make([]string, 0, inputHeight+2)
+	contentLines = append(contentLines, "")
+
+	textRows := strings.Split(m.input.View(), "\n")
+	for i := 0; i < len(textRows) && i < inputHeight; i++ {
+		contentLines = append(contentLines, "  "+textRows[i])
+	}
+
+	valid, invalid := m.links()
+	if len(valid) > 0 {
+		statusText := lipgloss.NewStyle().Foreground(theme.SuccessColor).Render(fmt.Sprintf("✓ Detected %d link(s)", len(valid)))
+		if invalid > 0 {
+			statusText += "  " + lipgloss.NewStyle().Foreground(theme.WarningColor).Render(fmt.Sprintf("(%d invalid)", invalid))
+		}
+		contentLines = append(contentLines, "  "+statusText)
+	} else if invalid > 0 {
+		statusText := lipgloss.NewStyle().Foreground(theme.WarningColor).Render(fmt.Sprintf("⚠ %d invalid line(s)", invalid))
+		contentLines = append(contentLines, "  "+statusText)
+	}
+
+	boxHeight := len(contentLines) + 2
+	boxLines := renderPanelBox("Add downloads", contentLines, width, boxHeight, true)
+
+	lines := make([]string, 0, height)
+	lines = append(lines, headerLine(appTitle, width))
+	lines = append(lines, boxLines...)
+
 	if footer.set {
 		lines = append(lines, footer.render(width))
-	} else {
-		lines = append(lines, "")
 	}
 	lines = append(lines, RenderHelpBar(addHelpKeys(), width))
+
+	if height > 0 && len(lines) > height {
+		lines = lines[:height]
+	}
 	return strings.Join(lines, "\n")
 }

@@ -171,18 +171,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) View() tea.View {
-	var content string
-	if a.width >= splitMinTerminalWidth && a.height >= splitMinTerminalHeight {
-		content = a.list.view(a.listView())
-	} else {
-		switch a.view {
-		case viewAdd:
-			content = a.add.view(a.width, a.height, a.footer())
-		default:
-			content = a.list.view(a.listView())
-		}
-	}
-
+	content := a.list.view(a.listView())
 	view := tea.NewView(content)
 	view.AltScreen = true
 	view.WindowTitle = appTitle
@@ -315,7 +304,7 @@ func (a *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		switch action {
 		case addSubmit:
 			return a.submitLinks()
-		case addBack:
+		case addSwitchPane, addBack:
 			a.view = viewList
 			return nil
 		case addQuit:
@@ -331,7 +320,7 @@ func (a *App) handleListKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch a.list.update(msg, a.snapshot.Tasks(), geometry.rows) {
 	case listQuit:
 		return a.requestQuit()
-	case listAddLinks:
+	case listSwitchPane, listAddLinks:
 		a.view = viewAdd
 		return nil
 	case listTogglePause:

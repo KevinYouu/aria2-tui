@@ -18,7 +18,8 @@ var (
 	keyMoreConnections  = key.NewBinding(key.WithKeys("+", "="), key.WithHelp("+/-", "connections"))
 	keyFewerConnections = key.NewBinding(key.WithKeys("-"))
 
-	keyAddLinks = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add links"))
+	keySwitchPane = key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "switch pane"))
+	keyAddLinks   = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add links"))
 
 	keySubmit = key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "download"))
 	keyBack   = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))
@@ -34,6 +35,7 @@ func listHelpKeys() []HelpKey {
 		keyTogglePause,
 		keyRemove,
 		keyMoreConnections,
+		keySwitchPane,
 		keyAddLinks,
 		keyQuitList,
 	)
@@ -41,5 +43,5 @@ func listHelpKeys() []HelpKey {
 
 // addHelpKeys is the help bar of the paste view.
 func addHelpKeys() []HelpKey {
-	return helpKeys(keySubmit, keyBack, keyQuit)
+	return helpKeys(keySubmit, keySwitchPane, keyBack, keyQuit)
 }

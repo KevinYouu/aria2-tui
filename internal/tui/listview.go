@@ -21,6 +21,7 @@ const (
 	listRemove
 	listMoreConnections
 	listFewerConnections
+	listSwitchPane
 )
 
 // listModel is the download list state: the selected download and the first
@@ -67,6 +68,8 @@ func (m *listModel) update(msg tea.KeyPressMsg, tasks []aria2.Task, rows int) li
 		return listMoreConnections
 	case key.Matches(msg, keyFewerConnections):
 		return listFewerConnections
+	case key.Matches(msg, keySwitchPane):
+		return listSwitchPane
 	case key.Matches(msg, keyAddLinks):
 		return listAddLinks
 	case key.Matches(msg, keyQuitList):
@@ -145,10 +148,24 @@ func (m *listModel) view(in listView) string {
 	lines = append(lines, headerLine(appTitle, in.width))
 
 	if in.width >= splitMinTerminalWidth && in.height >= splitMinTerminalHeight {
-		// Two-column split dashboard layout
-		leftWidth := clampInt(in.width*45/100, 36, 60)
+		// Two-column split dashboard layout:
+		// 1. Content-driven compact width: left column fits cursor, status icon,
+		// reasonable name length, percentage and speed comfortably without bloat.
+		leftWidth := clampInt(in.width*42/100, 36, 48)
 		rightWidth := in.width - leftWidth
-		panelHeight := geometry.rows
+
+		// 2. Stable compact height: independent of in.view (viewList vs viewAdd)
+		// to eliminate layout jitter when switching pane with Tab.
+		var idealContentRows int
+		if len(tasks) == 0 {
+			idealContentRows = 6
+		} else {
+			idealContentRows = clampInt(max(len(tasks), 11), 6, max(geometry.rows-2, 6))
+		}
+		idealPanelHeight := idealContentRows + 2 // include top and bottom borders
+
+		// Bound by available geometry budget from terminal window
+		panelHeight := clampInt(idealPanelHeight, splitMinTerminalHeight, geometry.rows)
 
 		innerRows := max(panelHeight-2, 1)
 		m.scrollTo(cursor, innerRows, len(tasks))
@@ -186,14 +203,64 @@ func (m *listModel) view(in listView) string {
 		splitRows := joinPanelLines(leftBox, rightBox, panelHeight)
 		lines = append(lines, splitRows...)
 	} else {
-		// Single-column fallback for narrow terminals
-		m.scrollTo(cursor, geometry.rows, len(tasks))
+		// Narrow terminal: Two-pane vertical stacked layout (Top: Downloads, Bottom: Details/Add Workbench)
+		// 1. Available height calculation:
+		chrome := 2 // appTitle header + statusLine
+		if geometry.banner {
+			chrome++
+		}
+		if geometry.help {
+			chrome++
+		}
+		availableH := max(in.height-chrome, 6)
+
+		// 2. Top pane (Downloads list):
+		leftDesired := max(len(tasks), 1)
+		maxTop := clampInt(availableH*45/100, 3, 7)
+		topHeight := clampInt(leftDesired+2, 3, maxTop)
+
+		innerRows := max(topHeight-2, 1)
+		m.scrollTo(cursor, innerRows, len(tasks))
+
+		topContent := make([]string, 0, innerRows)
 		if len(tasks) == 0 {
-			lines = append(lines, mutedStyle().Render(SafeTruncate("No downloads yet — press a to add links", in.width)))
+			topContent = append(topContent, "  "+mutedStyle().Render("No downloads yet"))
 		} else {
-			for i := m.offset; i < len(tasks) && i < m.offset+geometry.rows; i++ {
-				lines = append(lines, m.taskRow(in.width, tasks[i], i == cursor))
+			for i := m.offset; i < len(tasks) && i < m.offset+innerRows; i++ {
+				topContent = append(topContent, renderLeftTaskRow(tasks[i], i == cursor, in.width-2))
 			}
+		}
+		topTitle := fmt.Sprintf("Downloads (%d)", len(tasks))
+		topBox := renderPanelBox(topTitle, topContent, in.width, topHeight, in.view != viewAdd)
+		lines = append(lines, topBox...)
+
+		// 3. Bottom pane (Task Details or Add Workbench):
+		// Stable height independent of in.view to eliminate layout jitter on Tab.
+		remainingH := max(availableH-topHeight, 3)
+		var bottomDesired int
+		if len(tasks) == 0 {
+			bottomDesired = 5
+		} else {
+			bottomDesired = 6
+		}
+		bottomHeight := clampInt(bottomDesired, 3, remainingH)
+
+		if in.view == viewAdd && in.add != nil {
+			addContent := renderAddWorkbench(in.add, in.downloadDir, in.width-2, bottomHeight-2)
+			bottomBox := renderPanelBox("Add downloads", addContent, in.width, bottomHeight, true)
+			lines = append(lines, bottomBox...)
+		} else {
+			var selectedTask *aria2.Task
+			if t, ok := m.selected(tasks); ok {
+				selectedTask = &t
+			}
+			detailContent := renderTaskDetails(selectedTask, in.downloadDir, in.width-2, bottomHeight-2)
+			detailTitle := "Task Details"
+			if selectedTask != nil {
+				detailTitle = "Task Details: " + displayName(*selectedTask, max(in.width-20, 8))
+			}
+			detailBox := renderPanelBox(detailTitle, detailContent, in.width, bottomHeight, false)
+			lines = append(lines, detailBox...)
 		}
 	}
 
@@ -256,7 +323,10 @@ func (m *listModel) statusLine(in listView) string {
 		"↓ " + formatSpeed(in.stat.DownloadSpeed),
 		"↑ " + formatSpeed(in.stat.UploadSpeed),
 		fmt.Sprintf("%d active · %d waiting · %d done", in.stat.NumActive, in.stat.NumWaiting, in.stat.NumStopped),
-		"aria2c " + in.aria2Version,
 	}
+	if in.downloadDir != "" {
+		parts = append(parts, "dir: "+in.downloadDir)
+	}
+	parts = append(parts, "aria2c "+in.aria2Version)
 	return SafeTruncate(mutedStyle().Render(strings.Join(parts, "  ")), in.width)
 }
